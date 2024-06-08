@@ -52,7 +52,7 @@ globals:
     initial_value: '"Air Quality"'
 
 bme680_bsec:
-  address: ${bme_addr}
+  address: ${bme680_addr}
   
 sensor:
   - platform: bme680_bsec
