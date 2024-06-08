@@ -1,0 +1,466 @@
+substitutions:
+  name: multisensor
+  device_name: MultiSensor
+  device_make: WidgetInnovations
+  sw_version: "1.0"
+  bme680_addr: "0x76" # Addr pad unsoldered=0x76 / soldered=0x77
+
+esphome:
+  name: ${name}
+  comment: "${device_name} by ${device_make}"
+  name_add_mac_suffix: true
+  project:
+    name: "${device_make}.${device_name}"
+    version: "${sw_version}"
+  on_boot:
+    - script.execute: led_control
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+api:
+
+ota:
+
+wifi:
+
+  ap:
+
+captive_portal:
+
+dashboard_import:
+  package_import_url: github://Gadgit83/MultiSensor/ESPHome/multisensor-v2.0-roomsensor.yaml@main
+  import_full_config: false
+  
+esp32_touch:
+  setup_mode: False
+
+i2c:
+  sda: 16
+  scl: 17
+  scan: true
+  id: bus_a
+
+globals:
+  - id: previous_led_mode
+    type: std::string
+    restore_value: no
+    initial_value: '"Air Quality"'
+
+bme680_bsec:
+
+sensor:
+  - platform: bme680_bsec
+    address: ${bme_addr}
+    temperature:
+      name: "Temperature"
+    pressure:
+      name: "Pressure"
+    humidity:
+      name: "Humidity"
+      id: "humidity"
+    iaq:
+      name: "IAQ Value"
+      id: iaq
+    co2_equivalent:
+      name: "CO2"
+    breath_voc_equivalent:
+      name: "Breath VOC Equivalent"
+  - platform: adc
+    pin: GPIO34
+    id: "ambient_brightness"
+    name: "Brightness"
+    update_interval: 30s
+    attenuation: auto
+    icon: "mdi:brightness-7"
+    device_class: "ILLUMINANCE"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    unit_of_measurement: lx
+    filters:
+      - lambda: |-
+          return (x / 10000.0) * 2000000.0;
+      - sliding_window_moving_average:
+          window_size: 15
+          send_every: 5
+  - platform: template
+    name: "Is Night"
+    id: is_night
+    lambda: |-
+      static float day_threshold = 0;
+      static float night_threshold = 0;
+      static float min_light = 1e6;
+      static float max_light = 0;
+      float current_brightness = id(ambient_brightness).state;      
+
+      if (current_brightness > max_light) max_light = current_brightness;
+      if (current_brightness < min_light) min_light = current_brightness;
+
+      day_threshold = (max_light - min_light) * 0.75 + min_light;
+      night_threshold = (max_light - min_light) * 0.25 + min_light;
+
+      if (current_brightness < night_threshold) {
+        return true;
+      } else if (current_brightness > day_threshold) {
+        // Reset min and max light values each morning
+        min_light = 1e6;
+        max_light = 0;
+        return false;
+      } else if (day_threshold == night_threshold) {
+        return false;
+      } else {
+        return id(is_night).state;
+      }
+    on_value: 
+      then:
+        - script.execute: led_control
+    update_interval: 30s
+
+text_sensor:
+  - platform: bme680_bsec
+    iaq_accuracy:
+      name: "IAQ Accuracy"
+  - platform: template
+    name: "Air Quality"
+    id: "airquality_text"
+    icon: "mdi:checkbox-marked-circle-outline"
+    lambda: |-
+      if (int(id(iaq).state) <= 50) {
+        return {"Excellent"};
+      }
+      else if (int(id(iaq).state) <= 100) {
+        return {"Good"};
+      }
+      else if (int(id(iaq).state) <= 150) {
+        return {"Lightly polluted"};
+      }
+      else if (int(id(iaq).state) <= 200) {
+        return {"Moderately polluted"};
+      }
+      else if (int(id(iaq).state) <= 250) {
+        return {"Heavily polluted"};
+      }
+      else if (int(id(iaq).state) <= 350) {
+        return {"Severely polluted"};
+      }
+      else if (int(id(iaq).state) <= 500) {
+        return {"Extremely polluted"};
+      }
+      else {
+        return {"unknown"};
+      }
+    on_value:
+      - script.execute: led_control
+
+switch:
+  - platform: template
+    name: "Night Light Mode"
+    id: night_light_mode
+    optimistic: true
+    on_turn_on:
+      - script.execute: led_control
+    on_turn_off:
+      - script.execute: led_control
+
+binary_sensor:
+  - platform: gpio
+    name: "Movement"
+    pin:
+      number: 35
+      inverted: false
+      mode:
+        input: true
+    filters:
+      - delayed_on: 1000ms
+      - delayed_off: 600000ms
+    on_state: 
+      then:
+        - script.execute: led_control
+    id: movement
+  - platform: esp32_touch
+    name: "Touch Pad"
+    pin: GPIO04
+    threshold: 1050
+    filters:
+      - delayed_on_off: 100ms
+    on_press:
+      then:
+        - script.execute: switch_mode
+
+output:
+  - platform: ledc
+    pin: GPIO27
+    id: redLED
+    frequency: 223
+    inverted: True
+  - platform: ledc
+    pin: GPIO32
+    id: greenLED
+    frequency: 223
+    inverted: True
+  - platform: ledc
+    pin: GPIO33
+    id: blueLED
+    frequency: 223
+    inverted: True
+
+light:
+  - platform: rgb
+    name: "Status RGB LED"
+    id: "status_rgb_led"
+    red: redLED
+    green: greenLED
+    blue: blueLED
+    effects:
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 0.5s
+          update_interval: 0.5s
+          min_brightness: 0%
+          max_brightness: 100%
+      - pulse:
+          name: "Slow Pulse"
+          # transition_length: 1s      # defaults to 1s
+          update_interval: 2s
+select:
+  - platform: template
+    name: LED Mode
+    id: "led_mode"
+    options:
+     - "Air Quality"
+     - "Manual"
+     - "Motion Detection"
+     - "Night Mode"
+     - "Off"
+    initial_option: "Air Quality"
+    optimistic: true
+    set_action:
+      - script.execute: led_control
+      - script.execute: double_flash_green
+
+status_led:
+  pin: GPIO2
+
+script:
+  - id: led_control
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(is_night).state == true && id(led_mode).state != "Night Mode";'
+          then:
+            - globals.set:
+                id: previous_led_mode
+                value: !lambda 'return id(led_mode).state;'
+            - select.set:
+                id: led_mode
+                option: "Night Mode"
+      - if:
+          condition:
+            lambda: 'return !id(is_night).state && id(led_mode).state == "Night Mode";'
+          then:
+            - select.set:
+                id: led_mode
+                option: "Air Quality" #!lambda 'return id(previous_led_mode).c_str();'
+      - if:
+          condition:
+            lambda: 'return id(led_mode).state == "Night Mode";'
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(led_mode).state != "Off";'
+                then:
+                  - if:
+                      condition:
+                        binary_sensor.is_on: movement
+                      then:
+                        - light.turn_on:
+                            id: status_rgb_led
+                            red: 1.0
+                            green: 1.0
+                            blue: 0.0
+                            effect: "none"
+                      else:
+                        - delay: 10min
+                        - light.turn_on:
+                            id: status_rgb_led
+                            red: 1.0
+                            green: 1.0
+                            blue: 0.0
+                            effect: "none"
+                        - delay: 5min
+                        - light.turn_off:
+                            id: status_rgb_led
+                            transition_length: 5min
+      - if:
+          condition:
+            lambda: 'return id(led_mode).state == "Air Quality";'
+          then:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Excellent";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 0
+                      green: 1
+                      blue: 0
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Good";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 0.2
+                      green: 1
+                      blue: 0
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Lightly polluted";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 0.4
+                      green: 0.8
+                      blue: 0
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Moderately polluted";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 0.6
+                      green: 0.6
+                      blue: 0
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Heavily polluted";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 0.8
+                      green: 0.4
+                      blue: 0
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Severely polluted";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 1
+                      green: 0.2
+                      blue: 0
+                      effect: "Slow Pulse"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(airquality_text).state == "Extremely polluted";
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      red: 1
+                      green: 0
+                      blue: 0
+                      effect: "Fast Pulse"
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(led_mode).state == "Motion Detection";'
+                then:
+                  - if:
+                      condition:
+                        binary_sensor.is_on: movement
+                      then:
+                        - light.turn_on:
+                            id: status_rgb_led
+                            red: 0
+                            green: 0
+                            blue: 1
+                            effect: "none"
+                        - delay: 500ms
+                        - light.turn_off: status_rgb_led
+                        - delay: 500ms
+                        - light.turn_on:
+                            id: status_rgb_led
+                            red: 0
+                            green: 0
+                            blue: 1
+                            effect: "none"
+                      else:
+                        - light.turn_on:
+                            id: status_rgb_led
+                            red: 0
+                            green: 0
+                            blue: 1
+                            effect: "none"
+            - if:
+                condition:
+                  lambda: 'return id(led_mode).state == "Manual";'
+                then:
+                  - light.turn_on:
+                      id: status_rgb_led
+                      effect: "none"
+            - if:
+                condition:
+                  lambda: 'return id(led_mode).state == "Off";'
+                then:
+                  - light.turn_off:
+                      id: status_rgb_led
+  - id: switch_mode
+    then:
+      - select.set:
+          id: led_mode
+          option: !lambda |-
+            if (id(led_mode).state == "Off") {
+              return "Manual";
+            } else if (id(led_mode).state == "Manual") {
+              return "Motion Detection";
+            } else if (id(led_mode).state == "Motion Detection") {
+              return "Air Quality";
+            }else {
+              return "Off";
+            }
+  - id: double_flash_green
+    then:
+      - light.turn_off: 
+          id: status_rgb_led
+          transition_length: 200ms
+      - delay: 500ms
+      - light.turn_on:
+          id: status_rgb_led
+          red: 0
+          green: 1
+          blue: 0
+          transition_length: 200ms
+      - delay: 500ms
+      - light.turn_off: 
+          id: status_rgb_led
+          transition_length: 200ms
+      - delay: 500ms
+      - light.turn_on:
+          id: status_rgb_led
+          red: 0
+          green: 1
+          blue: 0
+          transition_length: 200ms
+      - delay: 500ms
+      - light.turn_off: 
+          id: status_rgb_led
+          transition_length: 200ms
+      - delay: 500ms
+      - script.execute: led_control
