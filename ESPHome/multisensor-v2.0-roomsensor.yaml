@@ -1,13 +1,14 @@
 substitutions:
   name: multisensor
   friendly_name: MultiSensor
+  product: MultiSensor
   device_make: WidgetInnovations
-  sw_version: "1.0.1"
+  sw_version: "1.0.2"
   bme680_addr: "0x76" # Addr pad unsoldered=0x76 / soldered=0x77
 
 esphome:
   name: ${name}
-  comment: "${friendly_name} by ${device_make}"
+  comment: "${product} by ${device_make}"
   name_add_mac_suffix: false
   friendly_name: ${friendly_name}
   project:
