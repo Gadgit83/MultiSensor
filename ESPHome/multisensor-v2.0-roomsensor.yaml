@@ -1,16 +1,17 @@
 substitutions:
   name: multisensor
-  device_name: MultiSensor
+  friendly_name: MultiSensor
   device_make: WidgetInnovations
-  sw_version: "1.0"
+  sw_version: "1.0.1"
   bme680_addr: "0x76" # Addr pad unsoldered=0x76 / soldered=0x77
 
 esphome:
   name: ${name}
-  comment: "${device_name} by ${device_make}"
-  name_add_mac_suffix: true
+  comment: "${friendly_name} by ${device_make}"
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
   project:
-    name: "${device_make}.${device_name}"
+    name: "${device_make}.${name}"
     version: "${sw_version}"
   on_boot:
     - script.execute: led_control
@@ -51,9 +52,32 @@ globals:
     restore_value: no
     initial_value: '"Air Quality"'
 
+number:
+  - platform: template
+    name: "Day Threshold"
+    id: day_threshold
+    optimistic: true
+    initial_value: 20
+    min_value: 0
+    max_value: 100000
+    step: 1
+    unit_of_measurement: "lx"
+    icon: "mdi:brightness-5"
+
+  - platform: template
+    name: "Night Threshold"
+    id: night_threshold
+    optimistic: true
+    initial_value: 15
+    min_value: 0
+    max_value: 100000
+    step: 1
+    unit_of_measurement: "lx"
+    icon: "mdi:brightness-3"
+
 bme680_bsec:
-  address: ${bme680_addr}
-  
+    address: ${bme680_addr}
+    
 sensor:
   - platform: bme680_bsec
     temperature:
@@ -83,7 +107,8 @@ sensor:
     unit_of_measurement: lx
     filters:
       - lambda: |-
-          return (x / 10000.0) * 2000000.0;
+            return x*100;
+      #    return (x / 10000.0) * 2000000.0;
       - sliding_window_moving_average:
           window_size: 15
           send_every: 5
@@ -91,26 +116,28 @@ sensor:
     name: "Is Night"
     id: is_night
     lambda: |-
-      static float day_threshold = 0;
-      static float night_threshold = 0;
-      static float min_light = 1e6;
-      static float max_light = 0;
-      float current_brightness = id(ambient_brightness).state;      
+      static float brightness_avg = 0;
+      static uint num_samples = 0;
+      const int sample_interval = 24*60*60/30; // Number of samples in a 24-hour period with 5-minute intervals
 
-      if (current_brightness > max_light) max_light = current_brightness;
-      if (current_brightness < min_light) min_light = current_brightness;
+      float current_brightness = id(ambient_brightness).state;
+      float d_threshold = id(day_threshold).state;
+      float n_threshold = id(night_threshold).state;
 
-      day_threshold = (max_light - min_light) * 0.75 + min_light;
-      night_threshold = (max_light - min_light) * 0.25 + min_light;
+      // Calculate moving average
+      brightness_avg = (brightness_avg * num_samples + current_brightness) / (num_samples + 1);
+      num_samples++;
 
-      if (current_brightness < night_threshold) {
+      // Reset averages at the start of a new day
+      if (num_samples >= sample_interval) {
+        num_samples = 0;
+        brightness_avg = 0;
+      }
+
+      // Determine if it's night or day based on thresholds
+      if (brightness_avg < n_threshold) {
         return true;
-      } else if (current_brightness > day_threshold) {
-        // Reset min and max light values each morning
-        min_light = 1e6;
-        max_light = 0;
-        return false;
-      } else if (day_threshold == night_threshold) {
+      } else if (brightness_avg > d_threshold) {
         return false;
       } else {
         return id(is_night).state;
@@ -176,7 +203,7 @@ binary_sensor:
         input: true
     filters:
       - delayed_on: 1000ms
-      - delayed_off: 600000ms
+      - delayed_off: 120s
     on_state: 
       then:
         - script.execute: led_control
@@ -247,11 +274,11 @@ status_led:
 
 script:
   - id: led_control
-    mode: restart
+    mode: single
     then:
-      - if:
+      - if: # Enter Night light mode when brightness is low
           condition:
-            lambda: 'return id(is_night).state == true && id(led_mode).state != "Night Mode";'
+            lambda: 'return id(night_light_mode).state==true && id(is_night).state == true && id(led_mode).state != "Night Mode";'
           then:
             - globals.set:
                 id: previous_led_mode
@@ -261,7 +288,7 @@ script:
                 option: "Night Mode"
       - if:
           condition:
-            lambda: 'return !id(is_night).state && id(led_mode).state == "Night Mode";'
+            lambda: 'return (!id(is_night).state && id(led_mode).state == "Night Mode") || id(night_light_mode).state==false;'
           then:
             - select.set:
                 id: led_mode
