@@ -85,7 +85,7 @@ sensor:
   - platform: uptime
     name: Uptime
   - platform: wifi_signal
-    names: Signal Strength
+    name: Signal Strength
   - platform: bme680_bsec
     temperature:
       name: "Temperature"
