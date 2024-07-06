@@ -3,7 +3,7 @@ substitutions:
   friendly_name: MultiSensor
   product: MultiSensor
   device_make: WidgetInnovations
-  sw_version: "1.1"
+  hw_version: "1.1"
   bme680_addr: "0x76" # Addr pad unsoldered=0x76 / soldered=0x77
 
 esphome:
@@ -12,8 +12,8 @@ esphome:
   name_add_mac_suffix: false
   friendly_name: ${friendly_name}
   project:
-    name: "${device_make}.${name}"
-    version: "${sw_version}"
+    name: "${device_make}.${product}"
+    version: "${hw_version}"
   on_boot:
     - script.execute: led_control
 
@@ -224,6 +224,14 @@ binary_sensor:
     on_press:
       then:
         - script.execute: switch_mode
+  - platform: analog_threshold
+    name: "Night Time"
+    sensor_id: night_time
+    threshold:
+      upper: !lambda 'return id(day_threshold).state'
+      lower: !lambda 'return id(night_threshold).state'
+    filters:
+      - invert:
 
 output:
   - platform: ledc
@@ -295,7 +303,7 @@ script:
                 option: "Night Mode"
       - if:
           condition:
-            lambda: 'return (!id(is_night).state && id(led_mode).state == "Night Mode") || id(night_light_mode).state==false;'
+            lambda: 'return (!id(is_night).state && id(led_mode).state == "Night Mode") || id(night_light_mode).state==false && id(led_mode).state != "Air Quality";'
           then:
             - select.set:
                 id: led_mode
