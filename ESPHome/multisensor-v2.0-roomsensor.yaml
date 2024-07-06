@@ -224,14 +224,6 @@ binary_sensor:
     on_press:
       then:
         - script.execute: switch_mode
-  - platform: analog_threshold
-    name: "Night Time"
-    sensor_id: night_time
-    threshold:
-      upper: !lambda 'return id(day_threshold).state'
-      lower: !lambda 'return id(night_threshold).state'
-    filters:
-      - invert:
 
 output:
   - platform: ledc
