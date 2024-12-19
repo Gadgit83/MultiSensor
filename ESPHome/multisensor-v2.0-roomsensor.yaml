@@ -3,7 +3,7 @@ substitutions:
   friendly_name: MultiSensor
   product: MultiSensor
   device_make: WidgetInnovations
-  sw_version: "1.0.2"
+  hw_version: "1.1"
   bme680_addr: "0x76" # Addr pad unsoldered=0x76 / soldered=0x77
 
 esphome:
@@ -12,8 +12,8 @@ esphome:
   name_add_mac_suffix: false
   friendly_name: ${friendly_name}
   project:
-    name: "${device_make}.${name}"
-    version: "${sw_version}"
+    name: "${device_make}.${product}"
+    version: "${hw_version}"
   on_boot:
     - script.execute: led_control
 
@@ -78,8 +78,13 @@ number:
 
 bme680_bsec:
     address: ${bme680_addr}
+    temperature_offset: 1
     
 sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: Signal Strength
   - platform: bme680_bsec
     temperature:
       name: "Temperature"
@@ -136,9 +141,9 @@ sensor:
       }
 
       // Determine if it's night or day based on thresholds
-      if (brightness_avg < n_threshold) {
+      if (current_brightness < n_threshold) {
         return true;
-      } else if (brightness_avg > d_threshold) {
+      } else if (current_brightness > d_threshold) {
         return false;
       } else {
         return id(is_night).state;
@@ -289,11 +294,11 @@ script:
                 option: "Night Mode"
       - if:
           condition:
-            lambda: 'return (!id(is_night).state && id(led_mode).state == "Night Mode") || id(night_light_mode).state==false;'
+            lambda: 'return (!id(is_night).state && id(led_mode).state == "Night Mode") || id(night_light_mode).state==false && id(led_mode).state != "Air Quality";'
           then:
-            - select.set:
-                id: led_mode
-                option: "Air Quality" #!lambda 'return id(previous_led_mode).c_str();'
+            #- select.set:
+            #    id: led_mode
+            #    option: "Air Quality" #!lambda 'return id(previous_led_mode).c_str();'
       - if:
           condition:
             lambda: 'return id(led_mode).state == "Night Mode";'
@@ -313,13 +318,6 @@ script:
                             blue: 0.0
                             effect: "none"
                       else:
-                        - delay: 10min
-                        - light.turn_on:
-                            id: status_rgb_led
-                            red: 1.0
-                            green: 1.0
-                            blue: 0.0
-                            effect: "none"
                         - delay: 5min
                         - light.turn_off:
                             id: status_rgb_led
