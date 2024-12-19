@@ -41,6 +41,8 @@ dashboard_import:
 esp32_touch:
   setup_mode: False
 
+
+
 i2c:
   sda: 16
   scl: 17
